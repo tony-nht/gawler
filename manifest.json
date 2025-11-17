@@ -1,12 +1,31 @@
 {
   "description": "FUCKYOUb",
   "manifest_version": 2,
-  "name": "Beastify",
+  "name": "HIHIHIHI",
   "version": "1.0",
   "homepage_url": "https://github.com/mdn/webextensions-examples/tree/master/beastify",
   "icons": {
     "48": "icons/beasts-48.png"
   },
+  "sidebar_action": {
+    "browser_style": true,
+    "default_title": "CHUNGUS PANEL",
+    "default_panel": "panel.html",
+    "default_icon": {
+      "19": "icons/window19.png",
+      "38": "icons/window38.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content_scripts/client.js"
+      ]
+    }
+  ],
   "permissions": [
     "activeTab",
     "downloads",
@@ -29,10 +48,6 @@
         "size": 32
       }
     ],
-    "default_title": "Beastify",
-    "default_popup": "popup/choose_beast.html"
-  },
-  "web_accessible_resources": [
-    "beasts/*.jpg"
-  ]
+    "default_title": "DELUXE"
+  }
 }

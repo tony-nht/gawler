@@ -23,13 +23,15 @@ function createCommand({ command, payload }) {
   return { command, payload }
 }
 
+function normalizeName(str) {
+  const n = str.slice();
+  const a = n.replace(/[^\w]/gi, '')
+  return a;
+}
 
-function handleMessage(msg, sender, response) {
+function handleMessage(msg, sender, res) {
+  console.log("PANEL::RECEIVED::MESSAGE", msg, sender, res);
   // Handle responses coming back from the background page.
-  if (msg.code === "IMG_LIST") {
-    const payload = msg.payload;
-    processAction({ action: ACTION.LOAD_IMAGE_URL_LIST, payload: { urls: payload ?? [] } });
-  }
   if (msg.code === "found-result") {
     // List out responses from the background page as they come in.
     let li = document.createElement("li");
@@ -39,11 +41,8 @@ function handleMessage(msg, sender, response) {
   if (msg.code === "TEST") {
     processAction({ action: ACTION.TEST, payload: msg.payload });
   }
-  if (msg.code === "HIHI") {
-    downloadImgToFs(msg.payload.uri, msg.payload.fname, () => {
-      updateTask(url, { state: IMAGE_STATE.SUCCESS });
-      onUrlOk?.();
-    }, onUriErr);
+  if (msg.code === "WAITED_FOR_IMG") {
+    processAction({ action: ACTION.IMAGE_URI_COLLECTED, payload: msg });
   }
 }
 
@@ -52,7 +51,8 @@ const store = {
   current: "",
   imageDict: new Map(),
   testData: [],
-  timers: new Set(),
+  timers: new Map(),
+  galleryName: ""
 
 }
 const IMAGE_STATE = {
@@ -66,30 +66,21 @@ const createImageTask = (url) => {
   return {
     galeryPreviewHref: url,
     qualitySingleHref: url,  // Is also the tabname
+    imageUri: "",
     imageOrder: null,
-    imageTaskState: IMAGE_STATE.INIT,
+    state: IMAGE_STATE.INIT,
     savedFileName: null
   }
 }
 
-const downloadImgToFs = (uri, fname, onOk, onErr) => {
-  const t = store.imageDict.get(uri);
-  if (t) {
-    browser.downloads.download({
-      url: uri,
-      filename: fname,
-      conflictAction: "uniquify",
-    }).then(() => {
-      onOk(uri);
-      t.state = IMAGE_STATE.SUCCESS;
-    }, () => {
-      onErr(uri);
-      t.state = IMAGE_STATE.FAILED;
-    });
+function downloadImagesSequentially(delayMs, onUrlOk, onUriErr) {
+  const unf = [];
+  for (let [k, v] of store.imageDict.entries()) {
+    if (v.state !== IMAGE_STATE.SUCCESS) {
+      unf.push(v.qualitySingleHref);
+    }
   }
-}
-
-function downloadImagesSequentially(urls, delayMs, onUrlOk, onUriErr) {
+  const urls = unf;
   if (urls.length === 0) {
     console.log("Download complete: No more URLs to process.");
     return;
@@ -100,31 +91,28 @@ function downloadImagesSequentially(urls, delayMs, onUrlOk, onUriErr) {
     const url = task.qualitySingleHref;
     console.log("MAXIMUS", url);
     if (url) {
-      const fname = `${task.imageOrder}.jpg`;
       const timerId = setTimeout(() => {
         const t = store.imageDict.get(url);
         if (t) {
-          t.state = IMAGE_STATE.DOWNLOADING;
-          const singleUrl = t.qualitySingleHref;
-          console.log("CHUNGUS", url);
-          createTabByUrl(singleUrl, () => {
-            console.log("DELUXE", url);
-            switchToTabByUrl(singleUrl, () => {
-              console.log("OPTIMUS", singleUrl);
-              sendCommandToCurrentTab(createCommand({ command: COMMAND.GET_IMAGE_URI }), (res) => {
-                if (res?.uri) {
-                  console.log("BEE", res.uri);
-                  downloadImgToFs(res.uri, `${fname}`, () => {
-                    updateTask(url, { state: IMAGE_STATE.SUCCESS });
-                    onUrlOk?.();
-                  }, onUriErr);
-                }
-              });
+          if (!t.imageUri) {
+            const singleUrl = t.qualitySingleHref;
+            console.log("CHUNGUS", url);
+            createTabByUrl(singleUrl);
+          }
+          else {
+            const uri = t.imageUri;
+            const prefix = normalizeName(store.galleryName ?? "");
+            const slh = uri.findLastIndex("/");
+            const base = uri.slice(slh + 1);
+            browser.downloads.download({
+              url: uri,
+              filename: `${prefix}/${base}`,
+              conflictAction: "uniquify",
             })
-          });
+          }
         }
       }, delayMs * i);
-      store.timers.add(timerId);
+      store.timers.set(url, timerId);
     }
   })
 
@@ -155,12 +143,12 @@ const switchToTabByUrl = (url, onOk, onErr) => {
 }
 
 const ACTION = {
-  LOAD_LOCAL_STORAGE: 0,
   LOAD_IMAGE_URL_LIST: 2,
   ADD_IMAGE_ITEM: 3,
   START_OR_REFILL: 4,
   CANCEL_ALL_SCHEDULED: 5,
   CLEAR_ALL_TASKS: 6,
+  IMAGE_URI_COLLECTED: 7,
   TEST: 999
 }
 function revitalize(onReviveOk, onReviveErr) {
@@ -184,19 +172,10 @@ function persist() {
 }
 
 function updateTask(url, newtsk) {
-  const k = LOCAL_STORAGE_KEY.IMG_TASKS;
-  const onOk = (lsd) => {
-    const d = new Map(JSON.parse(lsd[k]));
-    const ov = d.get(url);
-    if (ov) {
-      d.set(url, { ...ov, ...newtsk });
-      const mapAsArray = [...d.entries()];
-      const s = JSON.stringify(mapAsArray);
-      browser.storage.local.set({ [LOCAL_STORAGE_KEY.IMG_TASKS]: s });
-    }
-  };
-  const onErr = (err) => console.log(err);
-  browser.storage.local.get(k).then(onOk, onErr);
+  const o = store.imageDict.get(url);
+  if (o) {
+    store.imageDict.set(url, { ...o, ...newtsk });
+  }
 }
 
 
@@ -209,6 +188,7 @@ function processAction({ action, payload = {} }) {
       break;
     case ACTION.LOAD_IMAGE_URL_LIST:
       const l = payload.urls;
+      store.galleryName = normalizeName(payload.gn);
       for (let url of l) {
         if (url) {
           const t = createImageTask(url);
@@ -223,23 +203,20 @@ function processAction({ action, payload = {} }) {
           }
         }
       }
-      persist();
       break;
-    case ACTION.REFRESH:
-      const k = LOCAL_STORAGE_KEY.IMG_TASKS;
-      const updatedDictHandler = payload.cb;
-      const onOk = (lsd) => {
-        store.imageDict = lsd[k];
-        updatedDictHandler?.();
-      };
-      const onErr = (err) => console.log(err);
-      browser.storage.local.get(k).then(onOk, onErr);
+    case ACTION.IMAGE_URI_COLLECTED:
+      const url = payload.url;
+      const uri = payload.uri;
+      if (url && uri) {
+        const o = store.imageDict.get(url);
+        if (o) {
+          o.state = IMAGE_STATE.DOWNLOADING;
+          o.imageUri = uri;
+          rerender();
+        }
+      }
       break;
     case ACTION.CANCEL_ALL_SCHEDULED:
-      store.timers.clear();
-      for (let [k, v] of store.imageDict.entries()) {
-        store.imageDict.set(k, { ...v, state: IMAGE_STATE.INIT })
-      }
       break;
     case ACTION.CLEAR_ALL_TASKS:
       store.imageDict.clear();
@@ -247,17 +224,7 @@ function processAction({ action, payload = {} }) {
       persist();
       break;
     case ACTION.START_OR_REFILL:
-      const unf = [];
-      for (let [k, v] of store.imageDict.entries()) {
-        if (v.state !== IMAGE_STATE.SUCCESS) {
-          unf.push(v.qualitySingleHref);
-        }
-      }
-      console.log({ unf, len: unf.length });
-      if (unf.length > 0) {
-        downloadImagesSequentially(unf, 4000, (url) => {
-        });
-      }
+      downloadImagesSequentially(90000);
       break;
     case ACTION.TEST:
       const dt = payload;
@@ -294,6 +261,11 @@ function rerender() {
   });
   c.replaceChildren(...items);
 
+  if (store.galleryName) {
+    const r = document.getElementById("chungus-title");
+    r.innerText = store.galleryName;
+  }
+
   const r = document.getElementById("chungus-result");
   const p = document.createElement("pre");
   p.innerText = store.testData.toString();
@@ -321,7 +293,6 @@ function listenForClicks() {
       .catch(reportExecuteScriptError);
 
 
-
     document.addEventListener("click", (e) => {
       console.log("CLICK:", e);
 
@@ -335,7 +306,14 @@ function listenForClicks() {
           command: COMMAND.FETCH_IMAGE_URLS,
           payload: {}
         }), (res) => {
-          processAction({ action: ACTION.LOAD_IMAGE_URL_LIST, payload: { urls: res?.urls ?? [] } });
+          console.log("RES:", res);
+          processAction({
+            action: ACTION.LOAD_IMAGE_URL_LIST,
+            payload: {
+              urls: res?.urls ?? [],
+              gn: res?.gn ?? "HIHIHI"
+            }
+          });
           rerender();
         });
       }
@@ -354,18 +332,6 @@ function listenForClicks() {
         processAction({ action: ACTION.CLEAR_ALL_TASKS });
         rerender();
       }
-      // example code
-      else if (e.target.type === "reset") {
-        browser.tabs.query({ active: true, currentWindow: true })
-          .then()
-          .catch(reportError);
-      }
-      else if (e.target.type === "something") {
-        browser.tabs.query({ active: true, currentWindow: true })
-          .then()
-          .catch(reportError);
-      }
-
     });
 
     init = true;
@@ -388,3 +354,4 @@ browser.tabs.executeScript({ file: "/content_scripts/beastify.js" })
   .catch(reportExecuteScriptError);
 
 
+browser.runtime.onMessage.addListener(handleMessage);

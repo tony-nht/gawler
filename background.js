@@ -1,23 +1,20 @@
-function handleMessage(msg, sender, response) {
-  // Handle responses coming back from the background page.
-  if (msg.code === "IMG_LIST") {
-    const payload = msg.payload;
-    processAction({ action: ACTION.LOAD_IMAGE_URL_LIST, payload: { urls: payload ?? [] } });
-  }
-  if (msg.code === "found-result") {
-    // List out responses from the background page as they come in.
-    let li = document.createElement("li");
-    li.innerText = `Tab id: ${msg.id} at url: ${msg.url} had ${msg.count} hits.`;
-    results.appendChild(li);
-  }
+function handleMessage(msg, sender, res) {
+  console.log("BACKGROUND::MESSAGE::RECEIVED", msg, sender, res);
   if (msg.code === "TEST") {
-    processAction({ action: ACTION.TEST, payload: msg.payload });
+    console.log("CLICKED_TEST");
+    document.alert("TEST IS CLIECKED");
   }
-  if (msg.code === "HIHI") {
-    downloadImgToFs(msg.payload.uri, msg.payload.fname, () => {
-      updateTask(url, { state: IMAGE_STATE.SUCCESS });
-      onUrlOk?.();
-    }, onUriErr);
+  if (msg.code === "MANUAL_DOWNLOAD") {
+    const uri = msg.uri;
+    browser.downloads.download({
+      url: uri,
+      filename: "HIHIHI/" + uri.substring(
+        uri.lastIndexOf("/")
+      ),
+      conflictAction: "uniquify",
+    }).then(() => {
+      document.notify("DOWNLOADED");
+    })
   }
 }
-chrome.runtime.onMessage.addListener(handleMessage);
+browser.runtime.onMessage.addListener(handleMessage);

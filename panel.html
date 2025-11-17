@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8">
+	<link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css">
+	<style>
+		#chungus-menu button {
+			background-color: #007bff;
+			color: white;
+			padding: 12px 24px;
+			border: none;
+			border-radius: 6px;
+			cursor: pointer;
+			font-size: 1rem;
+			flex-grow: 0 50%;
+			max-width: 150px;
+		}
+
+		#chungus-result {
+			background: white;
+			border: 2px solid magenta;
+		}
+	</style>
+</head>
+
+<body>
+	<div id="chungus-container">
+		<div id="chungus-title">
+			My stupid extension name
+		</div>
+		<div id="chungus-menu" style="display:flex; flex-direction: row;flex-wrap:wrap;gap:8px;">
+			<button id="chungus-refresh"> Refresh</button>
+			<button id="chungus-setup"> Setup</button>
+			<button id="chungus-x">do X</button>
+			<button id="chungus-start">Start/Refill</button>
+			<button id="chungus-test">TEST</button>
+			<button id="chungus-clear">CLEAR</button>
+		</div>
+		<div id="chungus-content" style="display:flex;flex-wrap: wrap;gap:8px;"> ...No CONTENT yet...</div>
+	</div>
+	<div id="chungus-result">
+		CHUNGUS RESULT
+	</div>
+	</div>
+	<div id="popup-content">
+		<button>Frog</button>
+		<button>Turtle</button>
+		<button>Snake</button>
+		<button type="reset">Reset</button>
+	</div>
+	<div id="error-content" class="hidden">
+		<p>Can't beastify this web page.</p>
+		<p>Try a different page.</p>
+	</div>
+	<script src="panel.js"></script>
+</body>
+
+</html>
