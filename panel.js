@@ -73,6 +73,25 @@ const createImageTask = (url) => {
   }
 }
 
+function handleDownloadTask(t) {
+  const uri = t.imageUri;
+  if (uri) {
+    const prefix = normalizeName(store.galleryName ?? "");
+    const slh = uri.lastIndexOf("/");
+    const base = uri.slice(slh + 1);
+    browser.downloads.download({
+      url: uri,
+      filename: `${prefix}/${base}`,
+      conflictAction: "uniquify",
+    }).then(() => {
+      task.state = IMAGE_STATE.SUCCESS;
+    })
+      .catch(() => {
+        task.state = IMAGE_STATE.FAILED;
+      })
+    console.log("C", k);
+  }
+}
 function downloadImagesSequentially(delayMs, onUrlOk, onUriErr) {
   const unf = [];
   for (let [k, v] of store.imageDict.entries()) {
@@ -99,23 +118,46 @@ function downloadImagesSequentially(delayMs, onUrlOk, onUriErr) {
             console.log("CHUNGUS", url);
             createTabByUrl(singleUrl);
           }
-          else {
-            const uri = t.imageUri;
-            const prefix = normalizeName(store.galleryName ?? "");
-            const slh = uri.findLastIndex("/");
-            const base = uri.slice(slh + 1);
-            browser.downloads.download({
-              url: uri,
-              filename: `${prefix}/${base}`,
-              conflictAction: "uniquify",
-            })
-          }
         }
       }, delayMs * i);
-      store.timers.set(url, timerId);
     }
   })
 
+  // validate all images have uri 
+  let allGood = true;
+  for (let [k, v] of store.imageDict.entries()) {
+    const uri = v.imageUri;
+    if (!uri) {
+      allGood = false;
+      break;
+    }
+    if (typeof uri !== "string") {
+      allGood = false;
+      break;
+    }
+    if (uri.length < 10) {
+      allGood = false;
+      break;
+    }
+  }
+  console.log("IS EVERYTHING OK", allGood);
+  let counter = 0;
+  if (allGood) {
+    for (let [k, v] of store.imageDict.entries()) {
+      const task = v;
+      const url = task.qualitySingleHref;
+      if (url) {
+        const timerId = setTimeout(() => {
+          const t = store.imageDict.get(url);
+          if (t.imageUri) {
+            handleDownloadTask(t);
+          }
+        }, (delayMs > 7000 ? delayMs : 7000) * counter);
+        counter = counter + 1;
+        store.timers.set(url, timerId);
+      }
+    }
+  }
 }
 const createTabByUrl = (url, onOk, onErr) => {
   return browser.tabs.create({ url }).then(() => {
@@ -224,7 +266,7 @@ function processAction({ action, payload = {} }) {
       persist();
       break;
     case ACTION.START_OR_REFILL:
-      downloadImagesSequentially(90000);
+      downloadImagesSequentially(1000);
       break;
     case ACTION.TEST:
       const dt = payload;
@@ -257,6 +299,14 @@ function rerender() {
     }
     el.style.color = 'white';
     el.innerText = v?.imageOrder.toString();
+    el.addEventListener("click", () => {
+      const t = store.imageDict.get(k);
+      if (t.state !== IMAGE_STATE.SUCCESS) {
+        if (t.imageUri) {
+          handleDownloadTask(t);
+        }
+      }
+    });
     return el;
   });
   c.replaceChildren(...items);
