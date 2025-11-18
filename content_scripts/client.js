@@ -91,14 +91,31 @@
 
     // Communication with the background script
     browser.runtime.onMessage.addListener(async (msg) => {
-      console.log("CONTENT_SCRIPT::RECEIVE_MSG::", msg);
       if (msg.command === "FETCH_IMAGE_URLS") {
         const gn = normalizeName(document.querySelector("#gn").innerHTML);
-        const urls = Array.from(document.querySelectorAll("#gdt a")).map(i => {
-          return i.href
-        });
+        // List of pages
+        const gln = document.querySelectorAll(".gt100, .gt200, .x-infinite-scroll");
+
+        const l = []
+        for (const g of gln) {
+          console.log(g);
+          for (const p of g.children) {
+            if (p.nodeName === "A") {
+              const hr = p.href;
+              try {
+                const pnre = /\d+-\d+$/;
+                const lp = hr.substring(hr.lastIndexOf("/") + 1);
+                if (pnre.test(lp)) {
+                  l.push(hr);
+                }
+              } catch (e) {
+                console.log("ERROR_PARSE_LINK::", p);
+              }
+            }
+          }
+        }
         return Promise.resolve({
-          urls,
+          urls: l,
           gn
         });
       }
