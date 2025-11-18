@@ -19,6 +19,24 @@ function sendCommandToCurrentTab(msg, onOk, onErr) {
     })
     .catch(onErr);
 }
+
+function sendCommandToTabByUrl(url, msg, onOk, onErr) {
+  if (!msg?.command || !msg?.payload) {
+    console.error("Malformed command, dog");
+  };
+  return browser.tabs.query({
+    active: true,
+    currentWindow: true
+  }).then((tabs) => {
+    for (let tab of tabs) {
+      if (tab.url.includes(url)) {
+        console.log("SEND TO URL", url, msg);
+        browser.tabs.sendMessage(tab.id, msg).then((res) => onOk(res));
+        break;
+      }
+    }
+  });
+}
 function createCommand({ command, payload }) {
   return { command, payload }
 }
@@ -32,12 +50,6 @@ function normalizeName(str) {
 function handleMessage(msg, sender, res) {
   console.log("PANEL::RECEIVED::MESSAGE", msg, sender, res);
   // Handle responses coming back from the background page.
-  if (msg.code === "found-result") {
-    // List out responses from the background page as they come in.
-    let li = document.createElement("li");
-    li.innerText = `Tab id: ${msg.id} at url: ${msg.url} had ${msg.count} hits.`;
-    results.appendChild(li);
-  }
   if (msg.code === "TEST") {
     processAction({ action: ACTION.TEST, payload: msg.payload });
   }
@@ -50,6 +62,7 @@ function handleMessage(msg, sender, res) {
 const store = {
   current: "",
   imageDict: new Map(),
+  urlsArray: [],
   testData: [],
   timers: new Map(),
   galleryName: ""
@@ -77,22 +90,20 @@ function handleDownloadTask(t) {
   const uri = t.imageUri;
   if (uri) {
     const prefix = normalizeName(store.galleryName ?? "");
-    const slh = uri.lastIndexOf("/");
-    const base = uri.slice(slh + 1);
     browser.downloads.download({
       url: uri,
-      filename: `${prefix}/${base}`,
+      filename: `${prefix}/${t.imageOrder}`,
       conflictAction: "uniquify",
     }).then(() => {
-      task.state = IMAGE_STATE.SUCCESS;
+      console.log("OKOK:", t?.imageOrder);
+      updateTask(t.qualitySingleHref, { state: IMAGE_STATE.SUCCESS });
+    }, (e) => {
+      updateTask(t.qualitySingleHref, { state: IMAGE_STATE.FAILED });
+      console.log("ERRRO:", e?.toString());
     })
-      .catch(() => {
-        task.state = IMAGE_STATE.FAILED;
-      })
-    console.log("C", k);
   }
 }
-function downloadImagesSequentially(delayMs, onUrlOk, onUriErr) {
+function downloadImagesSequentially(delayMs) {
   const unf = [];
   for (let [k, v] of store.imageDict.entries()) {
     if (v.state !== IMAGE_STATE.SUCCESS) {
@@ -110,7 +121,7 @@ function downloadImagesSequentially(delayMs, onUrlOk, onUriErr) {
     const url = task.qualitySingleHref;
     console.log("MAXIMUS", url);
     if (url) {
-      const timerId = setTimeout(() => {
+      setTimeout(() => {
         const t = store.imageDict.get(url);
         if (t) {
           if (!t.imageUri) {
@@ -159,28 +170,9 @@ function downloadImagesSequentially(delayMs, onUrlOk, onUriErr) {
     }
   }
 }
-const createTabByUrl = (url, onOk, onErr) => {
+const createTabByUrl = (url, onOk) => {
   return browser.tabs.create({ url }).then(() => {
-    browser.tabs.executeScript({ file: "/content_scripts/beastify.js" })
     onOk?.();
-  });
-}
-
-const switchToTabByUrl = (url, onOk, onErr) => {
-  return browser.tabs.query({
-    currentWindow: true
-  }).then((tabs) => {
-    browser.tabs.executeScript({ file: "/content_scripts/beastify.js" })
-    for (let tab of tabs) {
-      if (tab.id === url) {
-        browser.tabs.update(url, {
-          active: true
-        }).then(() => {
-          browser.tabs.executeScript({ file: "/content_scripts/beastify.js" })
-          onOk?.()
-        });
-      }
-    }
   });
 }
 
@@ -193,7 +185,7 @@ const ACTION = {
   IMAGE_URI_COLLECTED: 7,
   TEST: 999
 }
-function revitalize(onReviveOk, onReviveErr) {
+function revitalize(onReviveOk) {
   const k = LOCAL_STORAGE_KEY.IMG_TASKS;
   const onOk = (lsd) => {
     try {
@@ -213,10 +205,12 @@ function persist() {
   browser.storage.local.set({ [LOCAL_STORAGE_KEY.IMG_TASKS]: s });
 }
 
-function updateTask(url, newtsk) {
+function updateTask(url, n) {
   const o = store.imageDict.get(url);
-  if (o) {
-    store.imageDict.set(url, { ...o, ...newtsk });
+  if (o && n) {
+    const t = Object.assign(o, n);
+    console.log("ASSINGNENING", { url, o, n, t });
+    store.imageDict.set(url, t);
   }
 }
 
@@ -231,20 +225,16 @@ function processAction({ action, payload = {} }) {
     case ACTION.LOAD_IMAGE_URL_LIST:
       const l = payload.urls;
       store.galleryName = normalizeName(payload.gn);
-      for (let url of l) {
+      store.urlsArray = l;
+      l.forEach((url, i) => {
         if (url) {
           const t = createImageTask(url);
-          const islash = url.lastIndexOf("/");
-          const imgOrdPart = url.substring(islash);
-          const idash = imgOrdPart.lastIndexOf("-");
-          const imgOrdNum = imgOrdPart.substring(idash + 1);
-          if (imgOrdNum) {
-            t.qualitySingleHref = url;
-            t.imageOrder = imgOrdNum;
-            store.imageDict.set(url, t);
-          }
+          const imgOrdNum = i;
+          t.qualitySingleHref = url;
+          t.imageOrder = imgOrdNum;
+          store.imageDict.set(url, t);
         }
-      }
+      })
       break;
     case ACTION.IMAGE_URI_COLLECTED:
       const url = payload.url;
@@ -255,6 +245,15 @@ function processAction({ action, payload = {} }) {
           o.state = IMAGE_STATE.DOWNLOADING;
           o.imageUri = uri;
           rerender();
+        }
+        else {
+          const trimmedUrl = url.slice(0, url.lastIndexOf("?"));
+          const o = store.imageDict.get(trimmedUrl);
+          if (o) {
+            o.state = IMAGE_STATE.DOWNLOADING;
+            o.imageUri = uri;
+            rerender();
+          }
         }
       }
       break;
@@ -278,9 +277,11 @@ function processAction({ action, payload = {} }) {
 }
 function rerender() {
   console.log("RENDERER:", store);
+  const r = document.getElementById("chungus-result");
   const c = document.getElementById("chungus-content");
-  const items = store.imageDict.keys().map(k => {
-    const v = store.imageDict.get(k);
+  const items = store.urlsArray.map((url, idx) => {
+    const v = store.imageDict.get(url);
+    if (!v) return null;
     const el = document.createElement('button');
     el.style.padding = '10px 10px';
     el.style.width = '48px';
@@ -298,17 +299,36 @@ function rerender() {
       el.style.backgroundColor = 'green';
     }
     el.style.color = 'white';
-    el.innerText = v?.imageOrder.toString();
+    el.innerText = idx.toString();
     el.addEventListener("click", () => {
-      const t = store.imageDict.get(k);
+      const t = store.imageDict.get(url);
+      const uri = t.imageUri;
       if (t.state !== IMAGE_STATE.SUCCESS) {
-        if (t.imageUri) {
+        if (uri) {
           handleDownloadTask(t);
         }
+        else {
+          sendCommandToTabByUrl(url,
+            { command: "GET_IMAGE_URI_FROM_PANEL", payload: {} },
+            (res) => {
+              updateTask(t, { imageUri: res.uri });
+              const n = store.imageDict.get(url);
+              handleDownloadTask(n);
+            })
+
+        }
       }
+      const urip = document.createElement("pre");
+      urip.id = "urip";
+      urip.innerText = uri;
+      const urlp = document.createElement("pre");
+      urlp.innerText = url;
+      urlp.id = "urlp";
+      r.replaceChildren(urip, urlp);
+
     });
     return el;
-  });
+  }).filter(e => e);
   c.replaceChildren(...items);
 
   if (store.galleryName) {
@@ -316,39 +336,27 @@ function rerender() {
     r.innerText = store.galleryName;
   }
 
-  const r = document.getElementById("chungus-result");
-  const p = document.createElement("pre");
-  p.innerText = store.testData.toString();
-  r.replaceChildren(p);
 }
 let init = null;
+
+function copyFunction(e) {
+  const copyText = e.textContent;
+  const textArea = document.createElement('textarea');
+  textArea.textContent = copyText;
+  document.body.append(textArea);
+  textArea.select();
+  textArea?.remove?.();
+  document.execCommand("copy");
+  const tmp = document.getElementById("TEMP");
+  tmp.innerText = "Copied pre text to clipboard";
+
+};
 function listenForClicks() {
   if (!init) {
     processAction({ action: ACTION.LOAD_LOCAL_STORAGE });
 
-    browser.tabs.executeScript({ file: "/content_scripts/beastify.js" })
-      .then(() => {
-        sendCommandToCurrentTab(createCommand({ command: COMMAND.GET_IMAGE_URI }), (res) => {
-          console.log("A:", res);
-          const uri = res.uri;
-          browser.downloads.download({
-            url: uri,
-            filename: "HIHIHI/" + uri.substring(
-              uri.lastIndexOf("_")
-            ),
-            conflictAction: "uniquify",
-          })
-        });
-      })
-      .catch(reportExecuteScriptError);
-
-
     document.addEventListener("click", (e) => {
       console.log("CLICK:", e);
-
-      function reportError(error) {
-        console.error(`Could not beastify: ${error}`);
-      }
 
       /* MENU HANDLERS */
       if (e.target.id === "chungus-setup") {
@@ -382,6 +390,11 @@ function listenForClicks() {
         processAction({ action: ACTION.CLEAR_ALL_TASKS });
         rerender();
       }
+      else if (e.target.id === "urip") {
+      }
+      else if (e.target.id === "urlp") {
+      }
+
     });
 
     init = true;
@@ -399,7 +412,7 @@ function reportExecuteScriptError(error) {
  * and add a click handler.
  * If we couldn't inject the script, handle the error.
  */
-browser.tabs.executeScript({ file: "/content_scripts/beastify.js" })
+browser.tabs.executeScript({ file: "/content_scripts/client.js" })
   .then(listenForClicks)
   .catch(reportExecuteScriptError);
 

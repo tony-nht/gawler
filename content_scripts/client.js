@@ -91,6 +91,7 @@
 
     // Communication with the background script
     browser.runtime.onMessage.addListener(async (msg) => {
+      console.log("CONTENT_SCRIPT::RECEIVE_MSG::", msg);
       if (msg.command === "FETCH_IMAGE_URLS") {
         const gn = normalizeName(document.querySelector("#gn").innerHTML);
         const urls = Array.from(document.querySelectorAll("#gdt a")).map(i => {
@@ -101,6 +102,7 @@
           gn
         });
       }
+      // Clickon Injected Page
       else if (msg.command === "GET_IMAGE_URI") {
         const ok = await waitForElm('#img');
         const img = document.getElementById("img");
@@ -108,10 +110,25 @@
         console.log("GETTING IMAGE: ", uri);
         if (uri) {
           return Promise.resolve({
-            uri
+            code: "WAITED_FOR_IMG",
+            uri,
+            url: document.location.href
           });
         }
       }
+      else if (msg.command === "GET_IMAGE_URI_FROM_PANEL") {
+        const ok = await waitForElm('#img');
+        const img = document.getElementById("img");
+        const uri = img?.src;
+        if (uri) {
+          return Promise.resolve({
+            code: "WAITED_FOR_IMG",
+            uri,
+            url: document.location.href
+          });
+        }
+      }
+
     });
 
   }
@@ -123,12 +140,17 @@
     initExt();
     waitForElm('#img').then(() => {
       const img = document.getElementById("img");
-      const uri = img?.src;
-      browser.runtime.sendMessage({
-        code: "WAITED_FOR_IMG",
-        uri,
-        url: document.location.href
-      });
+      if (!img.complete || img.loading) {
+        console.log("WAIT SECONDS FOR COMPLETE IMAGE");
+        setTimeout(() => {
+          const uri = img?.src;
+          browser.runtime.sendMessage({
+            code: "WAITED_FOR_IMG",
+            uri,
+            url: document.location.href
+          });
+        }, 7000);
+      }
     })
     window.hasRun = true;
   }
