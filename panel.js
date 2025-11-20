@@ -163,7 +163,7 @@ function downloadImagesSequentially(delayMs) {
           if (t.imageUri) {
             handleDownloadTask(t);
           }
-        }, (delayMs > 5100 ? delayMs : 5100) * counter);
+        }, (delayMs > 1100 ? delayMs : 1100) * counter);
         counter = counter + 1;
         store.timers.set(url, timerId);
       }
@@ -265,7 +265,7 @@ function processAction({ action, payload = {} }) {
       persist();
       break;
     case ACTION.START_OR_REFILL:
-      downloadImagesSequentially(1000);
+      downloadImagesSequentially(400);
       break;
     case ACTION.TEST:
       const dt = payload;
